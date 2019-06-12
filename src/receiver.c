@@ -46,6 +46,7 @@ void loop_handler(unsigned char *param, const struct pcap_pkthdr *packet_header,
 		udp_header uh = create_udp_header(RECEIVER_PORT, SENDER_PORT, 4);
 		custom_header ch = create_custom_header(pack);
 		packet *response = create_packet(eh, ih, uh, ch, (unsigned char*)"ACK", 4);
+		/* vraca 0, umesto broja bajtova, ako je paket uspesno poslat */
 		pcap_sendpacket(device_handle, (void*)response, sizeof(headers) + 4);
 		free(response);
 		printf("Sent ACK for %d\n", pack);
@@ -83,6 +84,7 @@ void *wifi_thread_function(void *param) {
 	/* eth tred se cancel-uje, jer je sve primljeno preko wi-fi */
 	
 	pthread_cancel(*eth_thread);
+	/* verovatno prekida pozivanje callback funkcije */
 	pcap_breakloop(eth_device_handle);
 	return NULL;
 }
@@ -101,6 +103,7 @@ void *eth_thread_function(void *param) {
 }
 
 /* velicina raspakovanog podatka (slike) */
+/* proverava se da li se velicina fajla koji je sender poslao poklapa sa velicinom fajla koji je receiver primio */
 
 void get_size(unsigned char *param, const struct pcap_pkthdr *packet_header, const unsigned char *packet_data) {
 	packet *p = (packet*) packet_data;
@@ -157,6 +160,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	// Check the link layer. We support only Ethernet for simplicity.
+	/* na sloju veze se koristi Ethernet protokol */
 	if (pcap_datalink(eth_device_handle) != DLT_EN10MB) {
 		printf("\nThis program works only on Ethernet networks.\n");
 		return 1;
@@ -190,6 +194,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	// Check the link layer. We support only Ethernet for simplicity.
+	/* na sloju veze se koristi Ethernet protokol */
 	if (pcap_datalink(wifi_device_handle) != DLT_EN10MB) {
 		printf("\nThis program works only on ethernet networks.\n");
 		return -1;

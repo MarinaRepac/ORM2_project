@@ -64,6 +64,8 @@ void loop_handler(unsigned char *param, const struct pcap_pkthdr *packet_header,
 }
 
 /* funkcija za proveru da li su wi-fi i eth tredovi zivi i postavljanje kontrolnih promenljivih, ako nisu ide ispis */
+/* The ntohs() function converts the unsigned short integer netshort from network byte order to host byte order. */
+/* big i little endian, nesto vezano za MSB i LSB*/
 
 void *wake_up_function(void *param) {
 	printf("Wake up thread created\n");
@@ -103,8 +105,10 @@ void *wifi_thread_function(void *param) {
 
 		while (!received[pack]) {
 			if (wifi_alive) {
+				/* vraca 0, umesto broja bajtova, ako je paket uspesno poslat */
 				pcap_sendpacket(wifi_device_handle, (unsigned char*) p, packet_size);
 				printf("Sent packet %d over wifi\n", pack);
+				/* vraca broj uspesno poslatih paketa; 0 ako nema paketa procitanih preko capture */
 				pcap_dispatch(wifi_device_handle, 1, loop_handler, (unsigned char *)&pack);
 
 				retries++;
@@ -118,7 +122,7 @@ void *wifi_thread_function(void *param) {
 					wifi_alive = 0;
 				}
 				
-			/* ako je wi-fi tred zavrsio pre eth treda, preusmerava se na eth tred i koristi sada oba --> pcap_dispatch */	
+			/* ako je wi-fi tred zavrsio pre eth treda, preusmerava se na eth tred i koristi sada oba */	
 			
 			} else if (wifi_finished) {
 				pcap_sendpacket(eth_device_handle, (unsigned char*) p, packet_size);
@@ -140,16 +144,20 @@ void *wifi_thread_function(void *param) {
 
 void *eth_thread_function(void *param) {
 	printf("Thread eth created\n");
+	
+	/* dok god paket nije poslat (receiverd[pack] = 0), vrti se while */
 
 	while (next_packet < packet_no) {
 		pthread_mutex_lock(&mutex);
 		int pack = next_packet++;
 		pthread_mutex_unlock(&mutex);
 		printf("eth: next_packet=%d, packet_no=%d\n", next_packet, packet_no);
+		
 		ethernet_header eh = create_eth_header(dst_eth_mac_address, src_eth_mac_address);
 		ip_header ih = create_ip_header(MAX_DATA_SIZE, src_eth_ip_address, dst_eth_ip_address);
 		udp_header uh = create_udp_header(SENDER_PORT, RECEIVER_PORT, MAX_DATA_SIZE);
 		custom_header ch = create_custom_header(pack);
+		
 		size_t data_size = (pack != packet_no - 1) ? MAX_DATA_SIZE : bytes % MAX_DATA_SIZE;
 		size_t packet_size = data_size + sizeof(headers);
 		packet *p = create_packet(eh, ih, uh, ch, memory + MAX_DATA_SIZE * pack, data_size);
@@ -159,8 +167,10 @@ void *eth_thread_function(void *param) {
 
 		while (!received[pack]) {
 			if (eth_alive) {
+				/* vraca 0, umesto broja bajtova, ako je paket uspesno poslat */
 				pcap_sendpacket(eth_device_handle, (unsigned char*)p, packet_size);
 				printf("Sent packet %d over eth\n", pack);
+				/* vraca broj uspesno poslatih paketa; 0 ako nema paketa procitanih preko capture */
 				pcap_dispatch(eth_device_handle, 1, loop_handler, (unsigned char*) &pack);
 				retries++;
 				printf("loop ended\n");
@@ -174,7 +184,7 @@ void *eth_thread_function(void *param) {
 					eth_alive = 0;
 				}
 				
-			/* ako je eth tred zavrsio pre wi-fi treda, preusmerava se na wi-fi tred i koristi sada oba --> pcap_dispatch */	
+			/* ako je eth tred zavrsio pre wi-fi treda, preusmerava se na wi-fi tred i koristi sada oba */	
 				
 			} else if (eth_finished) {
 				pcap_sendpacket(wifi_device_handle, (unsigned char*) p, packet_size);
@@ -248,9 +258,9 @@ int main(int argc, char *argv[]) {
 	// Open the capture device
 	if ((eth_device_handle = pcap_open_live(eth_device->name, // name of the device
 											65536,			  // portion of the packet to capture (65536 guarantees that the whole packet will be captured on all the link layers)
-											1,			  // promiscuous mode
+											1,			      // promiscuous mode
 											TIMEOUT,		  // read timeout
-											error_buffer	          // buffer where error message is stored
+											error_buffer	  // buffer where error message is stored
 											)) == NULL)	{
 		printf("\nUnable to open the adapter. %s is not supported by libpcap/WinPcap\n", eth_device->name);
 		pcap_freealldevs(devices);
@@ -258,6 +268,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	// Check the link layer. We support only Ethernet for simplicity.
+	/* na sloju veze se koristi Ethernet protokol */
 	if (pcap_datalink(eth_device_handle) != DLT_EN10MB) {
 		printf("\nThis program works only on Ethernet networks.\n");
 		return -1;
@@ -294,6 +305,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	// Check the link layer. We support only Ethernet for simplicity.
+	/* na sloju veze se koristi Ethernet protokol */
 	if (pcap_datalink(wifi_device_handle) != DLT_EN10MB) {
 		printf("\nThis program works only on ethernet networks.\n");
 		return -1;
@@ -303,6 +315,8 @@ int main(int argc, char *argv[]) {
 		return -1;
 	}
 
+	/* ako nema paketa za slanje vraca 0 */
+	/* postavlja neblokirajuci mod --> ne mora da ceka da jedan paket bude poslat pre nego sto nastavi dalje */
 	if (pcap_setnonblock(wifi_device_handle, 1, error_buffer) == -1) {
 		return -1;
 	}
@@ -311,12 +325,12 @@ int main(int argc, char *argv[]) {
 	FILE *f = fopen(argv[1], "rb");
 
 	fseek(f, 0L, SEEK_END);
-    	bytes = ftell(f);
-    	fseek(f, 0L, SEEK_SET);
+    bytes = ftell(f);
+    fseek(f, 0L, SEEK_SET);
 
-    	memory = (unsigned char*) malloc(bytes);
+    memory = (unsigned char*) malloc(bytes);
 
-    	fread(memory, sizeof(unsigned char), bytes, f);
+    fread(memory, sizeof(unsigned char), bytes, f);
 
 	packet_no = bytes / MAX_DATA_SIZE + 1;
 	received = (unsigned char*) malloc(packet_no);
